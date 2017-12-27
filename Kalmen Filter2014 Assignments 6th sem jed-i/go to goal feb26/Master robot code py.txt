@@ -1,0 +1,147 @@
+# Master Follower Robot
+# Implements a multi-variable linear Kalman filter. 
+# This code is based on a larger tutorial "Kalman Filters for Undergrads" 
+# located at http://greg.czerniak.info/node/5. 
+
+import serial 
+from numpy import matrix 
+from numpy import eye as identity 
+from numpy import transpose 
+from numpy import zeros 
+from numpy.linalg  import inv as inverse 
+
+ser = serial.Serial("/dev/ttyACM6",9600) 
+
+# How many seconds should elapse per iteration? 
+timeslice = 0.05 
+# accumulated error (for integral control)
+errorAcc = 0 
+errorOld = 0 
+	 
+# Implements a linear Kalman filter. 
+class KalmanFilterLinear: 
+  def __init__(self,_A, _B, _H, _x, _C, _W, _Q): 
+    self.A = _A         # State transition matrix. 
+    self.B = _B         # Control matrix. 
+    self.H = _H         # Observation matrix. 
+    self.X  = _x 	# current_state_estimate: Initial state estimate. 
+    self.C = _C  	# current_prob_estimate: Initial covariance estimate. 
+    self.W = _W         # Estimated error in process. 
+    self.Q = _Q         # Estimated error in measurements. 
+    self.AT = transpose(self.A) 
+    self.K = identity(2) 
+    self.V = identity(2) 
+	 
+  def GetCurrentState(self): 
+      return self.X 
+	 
+  def GetCurrentProb(self): 
+      return self.V 
+	 
+  def GetCurrentGain(self): 
+      return self.K 
+	 
+  def GetCurrentVar(self): 
+      return self.C 
+	 
+  def Step(self, u, z):   # u=control_vector, z=measurement_vector 
+		  
+      # observation_matrix 
+      self.HT = transpose(self.H) 
+
+      # Prediction step 
+      # predicted_state_estimate X_p = AX + Bu 
+      X_p = self.A * self.X + self.B * u 
+      # print "predicted", X_p 
+      # predicted_prob_estimate V_p = ACA_t + W 
+      V_p = (self.A * self.C) * self.AT + self.W 
+
+      # Observation step 
+      IC = self.H * V_p * self.HT + self.Q 
+      # kalman_gain K 
+      K = V_p * self.HT * inverse(IC) 
+      self.X = X_p + K * (z - self.H * X_p) 
+      self.C = V_p - K * self.H * V_p 
+      self.K = K 
+      self.V = V_p 
+
+def getMeasurement(s):
+	while(1):
+		try:
+			a = [] 
+			for s in ser.readline():
+				if not s.isdigit(): break
+				a.append(s) 
+			if a: return int(''.join(a))
+		except: 
+			continue		 
+
+tt = 0.5*timeslice*timeslice 
+
+## state = [relative position, relative velocity, master acceleration]
+## rel_pos = rel_pos + rel_vel*timeslice
+## rel_vel = rel_vel + master_accel*timeslice - follower_accel*timeslice
+## master_accel = master_accel
+state_transition = matrix([[1,-timeslice, tt],[0,1,timeslice],[0,0,1]]) 
+
+## control = [ follower_accel ]
+control_matrix = [[tt],[timeslice],[0]] 
+
+## measurement = [ relative position ]
+observation_matrix = [[1, 0, 0]] 
+
+# This is our guess of the initial state.
+initial_state = matrix([[10.0],[1.0],[0.000]]) 
+initial_probability = identity(3) 
+process_covariance = [[0.01,0,0],[0,0.01,0],[0,0,0.01]] 
+measurement_covariance = [[10*10]] 
+
+#Follower acceleration 
+follower_accel = 0.01 
+
+kf = KalmanFilterLinear(state_transition, control_matrix, observation_matrix, initial_state, initial_probability, process_covariance, measurement_covariance) 
+	 
+i = 0 
+while(1): 
+		
+	dist = getMeasurement()
+	# print dist 
+
+	control_vector = matrix([[follower_accel]]) 
+	measurement_vector = matrix([[dist]]) 
+	kf.Step(control_vector, measurement_vector) 
+ 
+	# predicted distance (relative position)
+	px = kf.GetCurrentState()[0,0] 
+	# predicted relative velocity 
+	pxdot = kf.GetCurrentState()[1,0] 
+	# predicted (master) acceleration
+	px2dot = kf.GetCurrentState()[2,0] 
+ 
+	# controller
+	kp = 3 
+	kd = 0.0001 
+	ki = 0 
+	errorNew = dist - px 
+	errorAcc += errorNew 
+	follower_pos = (kp*errorNew) + (kd*((errorOld-errorNew)/timeslice)) + (ki*errorAcc) 
+	
+	niter = 30	 
+	time = timeslice * niter 
+	# acceleration needed to catch up (dist) in 'niter' steps 
+	a1 = 2*(follower_pos/time/time -pxdot/time) + px2dot 
+	niter = 5 
+	time = timeslice * niter 
+ 
+	# acceleration to slow down (speed) 
+	a2 = -pxdot/time + px2dot 
+ 
+	# equal weightage to catching up and slowing down 
+	k1 = k2 = 1		 
+	follower_accel = (k1*a1+k2*a2)/(k1+k2) 
+	errorOld = errorNew 
+ 
+	control_string = str(int(px2dot)) 
+	print control_string 
+	ser.write(control_string) 
+	ser.write("\n") 

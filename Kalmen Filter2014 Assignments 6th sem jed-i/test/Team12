@@ -1,0 +1,88 @@
+#!/usr/bin/env python
+
+from numpy import *
+from scipy import *
+from pylab import *
+from scipy.integrate import odeint
+from scipy.signal import lti,step
+from matplotlib import pyplot as plt
+from control import *
+
+
+# THIS IS THE ORIGINAL PROGRAM. DO NOT CHANGE ANYTHING
+
+# vec=[y, v] [y_dot, v_dot] = [v, -ky - \alpha v]
+def d_eqn(vec,t):
+    return [vec[1], -vec[0]-0.1*vec[1]]
+
+# THIS IS THE ORIGINAL PROGRAM. DO NOT CHANGE ANYTHING
+l=2.75e-6  #H
+r=4  #ohm
+kt=0.0274  #Nm/amp
+kb=0.274   #Nm/Amp
+b=3.5077e-6  #Nms
+j=3.2284e-6   #kg m2
+
+A=([0,1,0],[0,-b/j,kt/j],[0,-kb/l,-r/l])
+B=([0],[0],[1/l])
+C=[1,0,0]
+D=0
+#control_matrix=[B,A*B]
+#ran=rank(control_matrix)
+#print ran
+p1=-10
+p2=-2
+p3=-1.5
+k=place(A,B,[p1,p2,p3])
+sys_plant=ss(A-b*k,B,C,D)
+w,v=eig(A)
+
+t=r_[0:0.05:4j]
+T1,yout1=step_response(1*sys_plant,t)
+yout2,T2=impulse(sys_plant,t)
+plt.plot(T1,yout1)
+plt.plot(T2,yout2)
+plt.show()
+#------------------
+#------------------
+#!/usr/bin/env python
+
+
+
+
+
+def make_quiver(y,v):
+    ty,tv=[],[]
+    for i in y:
+        for j in v:
+            [yy,vv]=d_eqn([i,j],0)
+            ty.append(yy)
+            tv.append(vv)
+    return array(ty).reshape((size(y),size(v))).transpose(),array(tv).reshape((size(y),size(v))).transpose()
+
+if __name__=="__main__":
+    t=arange(0,50,0.1)    
+    vec_init=[0,0.5]
+    yv=odeint(d_eqn , vec_init,t)
+    t
+    
+
+    figure()
+    grid(True)
+    xlabel("Time")
+    ylabel("Position and Velocity")
+    plot(t, yv)
+
+    figure()
+    y=arange(-1,1,0.1)
+    v=arange(-1,1,0.1)
+    Y, V = meshgrid(y,v)
+    #TY, TV = V, -Y-0.1*V
+    TY, TV = make_quiver(y,v)
+    grid(True)
+    quiver(Y,V,TY,TV)
+    plot(yv[:,0],yv[:,1])
+    xlabel("position")
+    ylabel("velocity")
+    show()
+
